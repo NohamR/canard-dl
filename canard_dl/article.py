@@ -91,6 +91,8 @@ def find_article(soup: BeautifulSoup) -> tuple[BeautifulSoup | None, BeautifulSo
 
 
 def extract_text(*elements: BeautifulSoup | None) -> str:
+    """Join the text of the given elements, collapsed and trimmed."""
+
     chunks = []
 
     for element in elements:

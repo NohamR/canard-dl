@@ -12,6 +12,11 @@ dependencies = [
 [project.scripts]
 canard-dl = "canard_dl.cli:main"
 
+[dependency-groups]
+dev = [
+    "pylint>=3.3",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

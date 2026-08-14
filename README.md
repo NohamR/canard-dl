@@ -39,4 +39,5 @@ Options:
 ```sh
 uv sync
 uv run python -X dev main.py "URL"
+uv run pylint canard_dl main.py
 ```

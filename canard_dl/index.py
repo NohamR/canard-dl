@@ -44,6 +44,8 @@ SECTIONS = {
 
 @dataclass(frozen=True)
 class Article:
+    """A single article listed on a section page."""
+
     title: str
     url: str
     date: datetime
@@ -113,7 +115,8 @@ def list_recent(*, section: str | None = None, days: int = 7) -> list[Article]:
     for name, path in sections.items():
         try:
             articles = fetch_section_articles(name, path)
-        except Exception as e:
+        # A failing section is skipped, the rest still get listed.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.warning("Failed to fetch section %s: %s", name, e)
             continue
 

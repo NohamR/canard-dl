@@ -43,6 +43,8 @@ def make_filename(url: str) -> str:
 
 
 def extract(url: str, output_dir: Path) -> None:
+    """Download an article and write its HTML and text files."""
+
     logger.info("Downloading: %s", url)
 
     html = fetch(url)
@@ -109,6 +111,8 @@ def extract(url: str, output_dir: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser."""
+
     parser = argparse.ArgumentParser(
         description=(
             "Extract an article from Le Canard Enchaîné "
@@ -206,6 +210,8 @@ def pick_article(*, section: str | None, days: int) -> str | None:
 
 
 def main() -> None:
+    """Entry point: download by URL or pick one from the latest list."""
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -224,7 +230,8 @@ def main() -> None:
 
             extract(args.url, Path(args.output))
 
-    except Exception as e:
+    # Top-level CLI entry point: any error becomes a clean exit code.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("Error: %s", e)
         sys.exit(1)
 
