@@ -11,6 +11,10 @@ https://github.com/debian-calibre/calibre/blob/37ec650f9dd717c235c96344eea749709
 
 import requests
 
+from canard_dl.logger import get_logger
+
+logger = get_logger(__name__)
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; Googlebot/2.1; "
@@ -29,6 +33,8 @@ HEADERS = {
 def fetch(url: str, *, timeout: int = 30) -> str:
     """Download the HTML of the given URL."""
 
+    logger.debug("GET %s (timeout=%ss)", url, timeout)
+
     response = requests.get(
         url,
         headers=HEADERS,
@@ -41,5 +47,12 @@ def fetch(url: str, *, timeout: int = 30) -> str:
     # always provide the expected charset.
     if not response.encoding:
         response.encoding = response.apparent_encoding
+
+    logger.debug(
+        "Status %s, %s bytes, encoding=%s",
+        response.status_code,
+        f"{len(response.content):,}",
+        response.encoding,
+    )
 
     return response.text

@@ -30,6 +30,11 @@ For each article, two files are written to `output/` (override with
 - `<slug>.html` — a standalone, minimal HTML page
 - `<slug>.txt` — plain text
 
+Logging goes to stderr and can be tuned with:
+
+- `-v, --verbose` — debug output (timestamps, module names, HTTP details)
+- `-q, --quiet` — only warnings and errors
+
 ## Development
 
 ```sh

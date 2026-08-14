@@ -15,7 +15,10 @@ from canard_dl.article import (
     sanitize_html,
     unlock_paywall,
 )
+from canard_dl.logger import get_logger, setup_logging
 from canard_dl.spoofer import fetch
+
+logger = get_logger(__name__)
 
 
 def make_filename(url: str) -> str:
@@ -38,18 +41,20 @@ def make_filename(url: str) -> str:
 
 
 def extract(url: str, output_dir: Path) -> None:
-    print(f"[+] Downloading: {url}")
+    logger.info("Downloading: %s", url)
 
     html = fetch(url)
 
-    print(f"[+] Downloaded {len(html):,} bytes")
+    logger.info("Downloaded %s bytes", f"{len(html):,}")
 
     soup = BeautifulSoup(html, "html.parser")
 
     # Remove CSS paywall.
+    logger.debug("Unlocking CSS paywall")
     unlock_paywall(soup)
 
     # Remove page junk.
+    logger.debug("Cleaning article")
     clean_article(soup)
 
     heading, editorial = find_article(soup)
@@ -80,6 +85,8 @@ def extract(url: str, output_dir: Path) -> None:
             else "Le Canard Enchaîné"
         )
 
+    logger.debug("Found title: %s", title)
+
     text = extract_text(heading, editorial)
     article_html = sanitize_html(heading, editorial)
 
@@ -93,11 +100,10 @@ def extract(url: str, output_dir: Path) -> None:
     html_path.write_text(article_html, encoding="utf-8")
     text_path.write_text(f"{title}\n\n{text}", encoding="utf-8")
 
-    print()
-    print(f"[+] Title : {title}")
-    print(f"[+] HTML  : {html_path}")
-    print(f"[+] Text  : {text_path}")
-    print(f"[+] Text size: {len(text):,} characters")
+    logger.info("Title : %s", title)
+    logger.info("HTML  : %s", html_path)
+    logger.info("Text  : %s", text_path)
+    logger.info("Text size: %s characters", f"{len(text):,}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,6 +126,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory (default: output)",
     )
 
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable debug logging",
+    )
+
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Only log warnings and errors",
+    )
+
     return parser
 
 
@@ -127,17 +147,16 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    setup_logging(verbose=args.verbose, quiet=args.quiet)
+
     if not args.url.startswith(("http://", "https://")):
-        print(
-            "Error: URL must start with http:// or https://",
-            file=sys.stderr,
-        )
+        logger.error("URL must start with http:// or https://")
         sys.exit(1)
 
     try:
         extract(args.url, Path(args.output))
     except Exception as e:
-        print(f"[!] Error: {e}", file=sys.stderr)
+        logger.error("Error: %s", e)
         sys.exit(1)
 
 
