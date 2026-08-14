@@ -15,6 +15,8 @@ from canard_dl.logger import get_logger
 
 logger = get_logger(__name__)
 
+BASE_URL = "https://www.lecanardenchaine.fr"
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; Googlebot/2.1; "

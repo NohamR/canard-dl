@@ -1,4 +1,5 @@
-"""Command-line interface: download a single article."""
+"""Command-line interface: download a single article or pick one
+from a list."""
 
 import argparse
 import re
@@ -15,6 +16,7 @@ from canard_dl.article import (
     sanitize_html,
     unlock_paywall,
 )
+from canard_dl.index import list_recent
 from canard_dl.logger import get_logger, setup_logging
 from canard_dl.spoofer import fetch
 
@@ -110,13 +112,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Extract an article from Le Canard Enchaîné "
-            "from a single URL."
+            "from a single URL or pick one from the latest list."
         )
     )
 
     parser.add_argument(
         "url",
-        help="URL of the article",
+        nargs="?",
+        help="URL of the article (optional when using --list)",
     )
 
     parser.add_argument(
@@ -124,6 +127,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         default="output",
         help="Output directory (default: output)",
+    )
+
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List recent articles and pick one to download",
+    )
+
+    parser.add_argument(
+        "--section",
+        help="Restrict the list to a section (default: all sections)",
+    )
+
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Only list articles from the last N days (default: 7)",
     )
 
     parser.add_argument(
@@ -143,18 +164,66 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def pick_article(*, section: str | None, days: int) -> str | None:
+    """Show the recent articles and return the chosen URL."""
+
+    articles = list_recent(section=section, days=days)
+
+    if not articles:
+        logger.error("No recent articles found")
+        return None
+
+    print()
+    print("Recent articles:")
+    print()
+
+    for i, article in enumerate(articles, 1):
+        print(
+            f"{i:3}. [{article.section}] "
+            f"{article.date:%d/%m/%Y} — {article.title}"
+        )
+        print(f"       {article.url}")
+
+    print()
+
+    while True:
+        try:
+            choice = input(
+                f"Pick an article to download "
+                f"(1-{len(articles)}, Enter to quit): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if not choice:
+            return None
+
+        if choice.isdigit() and 1 <= int(choice) <= len(articles):
+            return articles[int(choice) - 1].url
+
+        logger.warning("Invalid choice, try again")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
     setup_logging(verbose=args.verbose, quiet=args.quiet)
 
-    if not args.url.startswith(("http://", "https://")):
-        logger.error("URL must start with http:// or https://")
-        sys.exit(1)
-
     try:
-        extract(args.url, Path(args.output))
+        if args.list:
+            url = pick_article(section=args.section, days=args.days)
+
+            if url:
+                extract(url, Path(args.output))
+        else:
+            if not args.url or not args.url.startswith(("http://", "https://")):
+                logger.error("URL must start with http:// or https://")
+                sys.exit(1)
+
+            extract(args.url, Path(args.output))
+
     except Exception as e:
         logger.error("Error: %s", e)
         sys.exit(1)
