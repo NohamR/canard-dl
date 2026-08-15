@@ -49,10 +49,21 @@ Download a full digital issue as PDF (requires an account):
 uv run canard-dl --download -e EMAIL -p PASSWORD
 ```
 
+Or put your credentials in a `.env` file alongside the project root:
+
+```env
+CANARD_EMAIL=you@example.com
+CANARD_PASSWORD=your-password
+```
+
+```sh
+uv run canard-dl --download
+```
+
 Download a specific issue by number:
 
 ```sh
-uv run canard-dl --download 3922 -e EMAIL -p PASSWORD
+uv run canard-dl --download 5518
 ```
 
 Options:

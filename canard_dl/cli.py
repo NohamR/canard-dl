@@ -7,12 +7,14 @@ Two modes:
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 from canard_dl.article import (
     clean_article,
@@ -43,6 +45,23 @@ from canard_dl.spoofer import fetch
 logger = get_logger(__name__)
 
 LE_CANARD_PUBLICATION_ID = 315
+
+
+def _resolve_credentials(
+    email: str | None,
+    password: str | None,
+) -> tuple[str | None, str | None]:
+    """Populate missing credentials from .env and environment variables."""
+
+    load_dotenv()
+
+    if email is None:
+        email = os.getenv("CANARD_EMAIL") or os.getenv("EMAIL")
+
+    if password is None:
+        password = os.getenv("CANARD_PASSWORD") or os.getenv("PASSWORD")
+
+    return email, password
 
 
 def make_filename(url: str) -> str:
@@ -397,6 +416,8 @@ def main() -> None:
 
     try:
         if args.download is not None:
+            args.email, args.password = _resolve_credentials(args.email, args.password)
+
             if not args.email or not args.password:
                 logger.error("--download requires -e EMAIL and -p PASSWORD")
                 sys.exit(1)
