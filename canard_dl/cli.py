@@ -85,7 +85,7 @@ def extract(url: str, output_dir: Path) -> None:
 
     html = fetch(url)
 
-    logger.info("Downloaded %s bytes", f"{len(html):,}")
+    logger.info("Downloaded html page")
 
     soup = BeautifulSoup(html, "html.parser")
 
@@ -309,7 +309,7 @@ def cmd_download(args: argparse.Namespace) -> None:
             )
         )
 
-        pdf_path = output_dir / f"canard-{issue['number']}.pdf"
+        pdf_path = output_dir / f"canard-{issue['number']}-{args.level}.pdf"
         save_issue_pdf(pages, str(pdf_path))
 
         logger.info("Done: %s", pdf_path)

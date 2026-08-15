@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import requests
 from PIL import Image
+from tqdm import tqdm
 
 from canard_dl.logger import get_logger
 
@@ -213,8 +214,23 @@ def _download_tile(request: TileRequest, headers: dict[str, str]) -> tuple[int, 
     return request.y, request.x, response.content
 
 
+def _progress_info(progress: tqdm | None, message: str, *args: object) -> None:
+    """Write info lines without breaking an active tqdm progress bar."""
+
+    if progress is None:
+        logger.info(message, *args)
+        return
+
+    text = message % args if args else message
+    progress.write(f"INFO {text}")
+
+
 # pylint: disable=too-many-locals
-def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
+def download_page_tiles(
+    request: PageRequest,
+    *,
+    progress: tqdm | None = None,
+) -> list[list[bytes]]:
     """Download all tiles for a page at the given level.
 
     Returns a 2D list of tile image bytes: tiles[row][col].
@@ -223,7 +239,8 @@ def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
     settings = request.settings
     cols, rows = tile_grid(request.width, request.height, settings.level)
 
-    logger.info(
+    _progress_info(
+        progress,
         "Downloading page %d: %dx%d tiles at level %d",
         request.page_id,
         cols,
@@ -258,6 +275,8 @@ def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
         for future in as_completed(futures):
             row, col, payload = future.result()
             by_coord[(row, col)] = payload
+            if progress is not None:
+                progress.update(1)
 
     return [[by_coord[(row, col)] for col in range(cols)] for row in range(rows)]
 
@@ -299,10 +318,14 @@ def stitch_tiles(
     return buf.getvalue()
 
 
-def download_page_image(request: PageRequest) -> bytes:
+def download_page_image(
+    request: PageRequest,
+    *,
+    progress: tqdm | None = None,
+) -> bytes:
     """Download and stitch all tiles for a page into a JPEG."""
 
-    tiles = download_page_tiles(request)
+    tiles = download_page_tiles(request, progress=progress)
     return stitch_tiles(tiles, request.width, request.height, level=request.settings.level)
 
 
@@ -321,7 +344,10 @@ def download_issue(request: IssueRequest) -> list[bytes]:
     else:
         page_nums = list(range(1, request.nb_pages + 1))
 
-    for idx, page_num in enumerate(page_nums):
+    page_plan: list[tuple[int, dict]] = []
+    total_tiles = 0
+
+    for page_num in page_nums:
         page_meta = get_page(
             request.publication_id,
             request.document_id,
@@ -329,26 +355,43 @@ def download_issue(request: IssueRequest) -> list[bytes]:
             mtime=settings.mtime,
             token=settings.token,
         )
+        page_plan.append((page_num, page_meta))
 
-        img_data = download_page_image(
-            PageRequest(
-                publication_id=request.publication_id,
-                document_id=request.document_id,
-                page_id=page_num,
-                width=page_meta["width"],
-                height=page_meta["height"],
-                settings=RequestSettings(
-                    level=settings.level,
-                    is_double=settings.is_double,
-                    token=settings.token,
-                    mtime=settings.mtime,
+        cols, rows = tile_grid(page_meta["width"], page_meta["height"], settings.level)
+        total_tiles += cols * rows
+
+    with tqdm(
+        total=total_tiles,
+        desc=f"Issue #{request.document_id} tiles",
+        unit="tile",
+    ) as progress:
+        for idx, (page_num, page_meta) in enumerate(page_plan):
+
+            img_data = download_page_image(
+                PageRequest(
+                    publication_id=request.publication_id,
+                    document_id=request.document_id,
+                    page_id=page_num,
+                    width=page_meta["width"],
+                    height=page_meta["height"],
+                    settings=RequestSettings(
+                        level=settings.level,
+                        is_double=settings.is_double,
+                        token=settings.token,
+                        mtime=settings.mtime,
+                    ),
                 ),
+                progress=progress,
             )
-        )
 
-        pages.append(img_data)
+            pages.append(img_data)
 
-        logger.info("Page %d/%d done (%d bytes)", idx + 1, len(page_nums), len(img_data))
+            _progress_info(
+                progress,
+                "Page %d/%d done",
+                idx + 1,
+                len(page_nums),
+            )
 
     return pages
 

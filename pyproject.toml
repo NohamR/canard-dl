@@ -10,6 +10,7 @@ dependencies = [
     "Pillow>=11.0.0",
     "python-dotenv>=1.2.2",
     "inquirer>=3.4.1",
+    "tqdm>=4.70.0",
 ]
 
 [project.scripts]
