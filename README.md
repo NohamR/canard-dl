@@ -36,12 +36,12 @@ Each article is written to `output/` (override with `-o`) as `<slug>.html` and `
 
 Options:
 
-- `-o, --output DIR` — output directory (default: `output`)
-- `--list` — list recent articles and pick one to download
-- `--section NAME` — restrict the list to one section
-- `--days N` — only list articles from the last N days (default: 7)
-- `-v, --verbose` — debug output
-- `-q, --quiet` — only warnings and errors
+- `-o, --output DIR` : output directory (default: `output`)
+- `--list` : list recent articles and pick one to download
+- `--section NAME` : restrict the list to one section
+- `--days N` : only list articles from the last N days (default: 7)
+- `-v, --verbose` : debug output
+- `-q, --quiet` : only warnings and errors
 
 ## Issue download
 
@@ -78,11 +78,11 @@ Without an explicit issue number, the interactive selector lets you choose one o
 
 Options:
 
-- `-e, --email` — account email (required)
-- `-p, --password` — account password (required)
-- `-o, --output DIR` — output directory (default: `output`)
-- `--count N` — number of recent issues to list (default: 12)
-- `--level {0,1, 2}` — tile zoom level for issue download (default: 0)
+- `-e, --email` : account email (required)
+- `-p, --password` : account password (required)
+- `-o, --output DIR` : output directory (default: `output`)
+- `--count N` : number of recent issues to list (default: 12)
+- `--level {0,1, 2}` : tile zoom level for issue download (default: 0)
 
 ## Development
 
