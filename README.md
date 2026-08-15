@@ -60,6 +60,12 @@ CANARD_PASSWORD=your-password
 uv run canard-dl --download
 ```
 
+You can choose the tile level with `--level` (recommended values are only `0`, `1`, or `2`; default is `0`):
+
+```sh
+uv run canard-dl --download --level 1
+```
+
 Download a specific issue by number:
 
 ```sh
@@ -72,6 +78,7 @@ Options:
 - `-p, --password` — account password (required)
 - `-o, --output DIR` — output directory (default: `output`)
 - `--count N` — number of recent issues to list (default: 12)
+- `--level {0,1, 2}` — tile zoom level for issue download (default: 0)
 
 ## Development
 

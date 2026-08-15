@@ -273,6 +273,7 @@ def cmd_download(args: argparse.Namespace) -> None:
             document_id=issue["number"],
             nb_pages=doc["nbPages"],
             settings=RequestSettings(
+                level=args.level,
                 is_double=doc.get("isDouble", False),
                 token=access_token,
                 mtime=doc.get("mtime", 0),
@@ -387,6 +388,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=12,
         help="Number of recent issues to list (default: 12)",
+    )
+
+    parser.add_argument(
+        "--level",
+        type=int,
+        choices=(0, 1, 2),
+        default=0,
+        help="Tile zoom level for issue download (allowed: 0 or 1, default: 0)",
     )
 
     parser.add_argument(
