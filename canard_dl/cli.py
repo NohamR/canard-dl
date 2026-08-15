@@ -241,21 +241,21 @@ def cmd_download(args: argparse.Namespace) -> None:
         issue["display_date"],
     )
     access_token = get_streaming_token(
-        pub_id,
         issue["puc"],
+        issue["number"],
         user_token,
         customer_hash,
     )
 
     # Step 7: document metadata
-    doc = get_document(pub_id, issue["puc"], token=access_token)
+    doc = get_document(issue["puc"], issue["number"], token=access_token)
 
     # Step 8: download pages
     logger.info("Downloading %d pages...", doc["nbPages"])
 
     pages = download_issue(
-        pub_id,
         issue["puc"],
+        issue["number"],
         doc["nbPages"],
         is_double=doc.get("isDouble", False),
         token=access_token,

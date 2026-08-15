@@ -37,19 +37,22 @@ def _url(path: str, token: str = "", mtime: int = 0) -> str:
     if mtime:
         params.append(f"mt={mtime}")
     sep = "&" if "?" in path else "?"
-    return f"{PV5_API}{path}{sep}{','.join(params)}" if params else f"{PV5_API}{path}"
+    return f"{PV5_API}{path}{sep}{'&'.join(params)}" if params else f"{PV5_API}{path}"
 
 
 def get_document(publication_id: int, document_id: int, token: str = "") -> dict:
     """Fetch document metadata."""
 
     url = f"{PV5_API}/document/{publication_id}/{document_id}"
+    params = {}
+    if token:
+        params["token"] = token
 
     import requests
 
     response = requests.get(
         url,
-        headers=_headers(token),
+        params=params,
         timeout=30,
     )
 
@@ -76,20 +79,22 @@ def get_page(
     *,
     is_double: bool = False,
     mtime: int = 0,
+    token: str = "",
 ) -> dict:
     """Fetch page metadata (width, height, number, etc.)."""
 
-    server_id = _server_id(page_id, is_double)
-
-    url = f"{PV5_API}/document/{publication_id}/{document_id}/page/{server_id}"
+    url = f"{PV5_API}/document/{publication_id}/{document_id}/page/{page_id}"
+    params = {}
+    if token:
+        params["token"] = token
     if mtime:
-        url += f"?mt={mtime}"
+        params["mt"] = mtime
 
     import requests
 
     response = requests.get(
         url,
-        headers=_headers(),
+        params=params,
         timeout=30,
     )
 
@@ -98,9 +103,8 @@ def get_page(
     page = response.json()
 
     logger.debug(
-        "Page %d (server_id=%d): %dx%d, numbers=%s",
+        "Page %d: %dx%d, numbers=%s",
         page_id,
-        server_id,
         page.get("width"),
         page.get("height"),
         page.get("number"),
@@ -311,18 +315,25 @@ def download_issue(
 ) -> list[bytes]:
     """Download all pages of an issue as JPEG images.
 
-    Returns a list of JPEG image bytes, one per logical page.
+    Returns a list of JPEG image bytes, one per page image.
+    For double spreads, each image covers two logical pages.
     """
 
     pages: list[bytes] = []
 
-    for page_num in range(1, nb_pages + 1):
+    if is_double:
+        page_nums = [1] + list(range(2, nb_pages + 1, 2))
+    else:
+        page_nums = list(range(1, nb_pages + 1))
+
+    for idx, page_num in enumerate(page_nums):
         page_meta = get_page(
             publication_id,
             document_id,
             page_num,
             is_double=is_double,
             mtime=mtime,
+            token=token,
         )
 
         img_data = download_page_image(
@@ -338,7 +349,7 @@ def download_issue(
 
         pages.append(img_data)
 
-        logger.info("Page %d/%d done (%d bytes)", page_num, nb_pages, len(img_data))
+        logger.info("Page %d/%d done (%d bytes)", idx + 1, len(page_nums), len(img_data))
 
     return pages
 

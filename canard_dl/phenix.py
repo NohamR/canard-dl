@@ -223,8 +223,8 @@ def get_issues(
 
 
 def get_streaming_token(
-    publication_id: int,
-    document_id: int,
+    puc: int,
+    number: int,
     user_token: str,
     customer_hash: str,
 ) -> str:
@@ -232,7 +232,7 @@ def get_streaming_token(
 
     url = (
         f"{PHENIX_URL}/api/v1/app/{APP_ID}/store/default"
-        f"/get-streaming-token/number/{publication_id}/{document_id}"
+        f"/get-streaming-token/number/{puc}/{number}"
     )
     params = {"license_lock_time": 1, "language": "fr"}
 

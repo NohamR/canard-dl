@@ -17,3 +17,4 @@ debug.html
 output/
 .env
 /research
+.DS_Store
