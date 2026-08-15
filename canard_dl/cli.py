@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import inquirer
 
 from canard_dl.article import (
     clean_article,
@@ -139,45 +140,65 @@ def extract(url: str, output_dir: Path) -> None:
     logger.info("Text size: %s characters", f"{len(text):,}")
 
 
-def pick_article(*, section: str | None, days: int) -> str | None:
-    """Show the recent articles and return the chosen URL."""
+def _prompt_article_selection(*, section: str | None, days: int) -> list[str]:
+    """Prompt for one or more article URLs, with a "fetch older" action."""
 
-    articles = list_recent(section=section, days=days)
-
-    if not articles:
-        logger.error("No recent articles found")
-        return None
-
-    print()
-    print("Recent articles:")
-    print()
-
-    for i, article in enumerate(articles, 1):
-        print(
-            f"{i:3}. [{article.section}] "
-            f"{article.date:%d/%m/%Y} — {article.title}"
-        )
-        print(f"       {article.url}")
-
-    print()
+    selected_urls: set[str] = set()
+    window_days = days
+    base_days = max(1, days)
 
     while True:
-        try:
-            choice = input(
-                f"Pick an article to download "
-                f"(1-{len(articles)}, Enter to quit): "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return None
+        articles = list_recent(section=section, days=window_days)
 
-        if not choice:
-            return None
+        if not articles:
+            logger.error("No recent articles found")
+            return []
 
-        if choice.isdigit() and 1 <= int(choice) <= len(articles):
-            return articles[int(choice) - 1].url
+        more_key = "__more_articles__"
+        choices = [
+            (
+                f"[{article.section}] {article.date:%d/%m/%Y} — {article.title}",
+                article.url,
+            )
+            for article in articles
+        ]
+        choices.append(("Fetch older articles", more_key))
 
-        logger.warning("Invalid choice, try again")
+        answer = inquirer.prompt(
+            [
+                inquirer.Checkbox(
+                    "selected",
+                    message="Select one or more articles",
+                    choices=choices,
+                )
+            ]
+        )
+
+        if not answer:
+            return []
+
+        picked = answer.get("selected", [])
+        wants_more = more_key in picked
+
+        for url in picked:
+            if url != more_key:
+                selected_urls.add(url)
+
+        if wants_more:
+            window_days += base_days
+            continue
+
+        ordered_urls: list[str] = []
+        seen_urls: set[str] = set()
+
+        for article in articles:
+            if article.url not in selected_urls or article.url in seen_urls:
+                continue
+
+            seen_urls.add(article.url)
+            ordered_urls.append(article.url)
+
+        return ordered_urls
 
 
 def _resolve_canard_publication(publications: list[dict]) -> dict:
@@ -195,17 +216,17 @@ def _resolve_canard_publication(publications: list[dict]) -> dict:
     return fallback
 
 
-def _select_issue(issues: list[dict], number: int | None) -> dict | None:
-    """Return the chosen issue or prompt interactively if no number is supplied."""
+def _select_issues(issues: list[dict], number: int | None) -> list[dict]:
+    """Return selected issues, or a single direct match if a number is supplied."""
 
     if number is not None:
         for issue in issues:
             if issue["number"] == number:
-                return issue
+                return [issue]
         logger.error("Issue #%d not found", number)
         sys.exit(1)
 
-    return _pick_issue(issues)
+    return _pick_issues(issues)
 
 
 def _login(email: str, password: str) -> tuple[str, str]:
@@ -220,8 +241,8 @@ def _login(email: str, password: str) -> tuple[str, str]:
     return login_data["x_user_token"], login_data["customer_hash"]
 
 
-def _load_issue_download(args: argparse.Namespace) -> tuple[dict, str, dict] | None:
-    """Fetch the selected issue, access token and document metadata."""
+def _load_issue_context(args: argparse.Namespace) -> tuple[dict, str, str]:
+    """Fetch the publication context and authenticated credentials."""
 
     user_token, customer_hash = _login(args.email, args.password)
     publications = get_publications(user_token, customer_hash, anonymous=False)
@@ -237,90 +258,152 @@ def _load_issue_download(args: argparse.Namespace) -> tuple[dict, str, dict] | N
         logger.error("No issues found")
         sys.exit(1)
 
-    issue = _select_issue(issues, args.number)
-    if issue is None:
-        return None
-
-    logger.info(
-        "Getting streaming token for #%d (%s)...",
-        issue["number"],
-        issue["display_date"],
-    )
-    access_token = get_streaming_token(
-        issue["puc"],
-        issue["number"],
-        user_token,
-        customer_hash,
-    )
-
-    doc = get_document(issue["puc"], issue["number"], token=access_token)
-    logger.info("Downloading %d pages...", doc["nbPages"])
-    return issue, access_token, doc
+    return canard, user_token, customer_hash
 
 
 def cmd_download(args: argparse.Namespace) -> None:
     """Handle the 'download' subcommand — download a full issue."""
 
-    issue_data = _load_issue_download(args)
-    if issue_data is None:
-        return
-
-    issue, access_token, doc = issue_data
-    output_dir = Path(args.output)
-    pages = download_issue(
-        IssueRequest(
-            publication_id=issue["puc"],
-            document_id=issue["number"],
-            nb_pages=doc["nbPages"],
-            settings=RequestSettings(
-                level=args.level,
-                is_double=doc.get("isDouble", False),
-                token=access_token,
-                mtime=doc.get("mtime", 0),
-            ),
-        )
+    canard, user_token, customer_hash = _load_issue_context(args)
+    issues = _choose_issues(
+        canard["publication_id"],
+        user_token,
+        customer_hash,
+        count=args.count,
+        number=args.number,
     )
 
+    if not issues:
+        return
+
+    output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_dir / f"canard-{issue['number']}.pdf"
-    save_issue_pdf(pages, str(pdf_path))
 
-    logger.info("Done: %s", pdf_path)
-
-
-def _pick_issue(issues: list[dict]) -> dict | None:
-    """Show issues and return the chosen one."""
-
-    print()
-    print("Available issues:")
-    print()
-
-    for i, issue in enumerate(issues, 1):
-        print(
-            f"{i:3}. #{issue['number']} — "
-            f"{issue['display_date']} "
-            f"({issue['pages']} pages)"
+    for issue in issues:
+        logger.info(
+            "Getting streaming token for #%d (%s)...",
+            issue["number"],
+            issue["display_date"],
+        )
+        access_token = get_streaming_token(
+            issue["puc"],
+            issue["number"],
+            user_token,
+            customer_hash,
         )
 
-    print()
+        doc = get_document(issue["puc"], issue["number"], token=access_token)
+        logger.info("Downloading %d pages...", doc["nbPages"])
+
+        pages = download_issue(
+            IssueRequest(
+                publication_id=issue["puc"],
+                document_id=issue["number"],
+                nb_pages=doc["nbPages"],
+                settings=RequestSettings(
+                    level=args.level,
+                    is_double=doc.get("isDouble", False),
+                    token=access_token,
+                    mtime=doc.get("mtime", 0),
+                ),
+            )
+        )
+
+        pdf_path = output_dir / f"canard-{issue['number']}.pdf"
+        save_issue_pdf(pages, str(pdf_path))
+
+        logger.info("Done: %s", pdf_path)
+
+
+def _pick_issues(issues: list[dict]) -> list[dict]:
+    """Prompt for one or more issues."""
+
+    issue_map = {issue["number"]: issue for issue in issues}
+    choices = [
+        (
+            f"#{issue['number']} — {issue['display_date']} ({issue['pages']} pages)",
+            issue["number"],
+        )
+        for issue in issues
+    ]
+
+    answer = inquirer.prompt(
+        [
+            inquirer.Checkbox(
+                "selected",
+                message="Select one or more issues",
+                choices=choices,
+            )
+        ]
+    )
+
+    if not answer:
+        return []
+
+    selected_numbers = answer.get("selected", [])
+    return [issue_map[number] for number in selected_numbers if number in issue_map]
+
+
+def _choose_issues(
+    publication_id: int,
+    user_token: str,
+    customer_hash: str,
+    *,
+    count: int,
+    number: int | None,
+) -> list[dict]:
+    """Prompt issue selection and allow fetching older issues by increasing count."""
+
+    fetch_count = max(1, count)
 
     while True:
-        try:
-            choice = input(
-                f"Pick an issue to download "
-                f"(1-{len(issues)}, Enter to quit): "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return None
+        issues = get_issues(
+            publication_id,
+            user_token,
+            customer_hash,
+            count=fetch_count,
+        )
 
-        if not choice:
-            return None
+        if not issues:
+            logger.error("No issues found")
+            return []
 
-        if choice.isdigit() and 1 <= int(choice) <= len(issues):
-            return issues[int(choice) - 1]
+        if number is not None:
+            return _select_issues(issues, number)
 
-        logger.warning("Invalid choice, try again")
+        issue_map = {issue["number"]: issue for issue in issues}
+        more_key = -1
+        choices = [
+            (
+                f"#{issue['number']} — {issue['display_date']} ({issue['pages']} pages)",
+                issue["number"],
+            )
+            for issue in issues
+        ]
+        choices.append(("Fetch older issues", more_key))
+
+        answer = inquirer.prompt(
+            [
+                inquirer.Checkbox(
+                    "selected",
+                    message="Select one or more issues",
+                    choices=choices,
+                )
+            ]
+        )
+
+        if not answer:
+            return []
+
+        selected = answer.get("selected", [])
+        wants_more = more_key in selected
+        selected_numbers = [number for number in selected if number in issue_map]
+
+        if wants_more:
+            fetch_count += count
+            continue
+
+        return [issue_map[number] for number in selected_numbers]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -393,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--level",
         type=int,
-        choices=(0, 1, 2),
+        choices=(0, 1),
         default=0,
         help="Tile zoom level for issue download (allowed: 0 or 1, default: 0)",
     )
@@ -436,9 +519,9 @@ def main() -> None:
             cmd_download(args)
 
         elif args.list:
-            url = pick_article(section=args.section, days=args.days)
+            urls = _prompt_article_selection(section=args.section, days=args.days)
 
-            if url:
+            for url in urls:
                 extract(url, Path(args.output))
         else:
             if not args.url or not args.url.startswith(("http://", "https://")):

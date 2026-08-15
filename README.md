@@ -23,12 +23,14 @@ Download by URL:
 uv run canard-dl "https://www.lecanardenchaine.fr/societe/54632-quand-la-croisiere-ne-s-amuse-pas"
 ```
 
-Or list recent articles and pick one interactively:
+Or list recent articles and select one or more interactively:
 
 ```sh
 uv run canard-dl --list
 uv run canard-dl --list --section Économie
 ```
+
+The interactive selector supports selecting multiple articles and a "Fetch older articles" action.
 
 Each article is written to `output/` (override with `-o`) as `<slug>.html` and `<slug>.txt`.
 
@@ -60,7 +62,7 @@ CANARD_PASSWORD=your-password
 uv run canard-dl --download
 ```
 
-You can choose the tile level with `--level` (recommended values are only `0`, `1`, or `2`; default is `0`):
+You can choose the tile level with `--level` (allowed values are only `0` or `1`; default is `0`):
 
 ```sh
 uv run canard-dl --download --level 1
@@ -72,13 +74,15 @@ Download a specific issue by number:
 uv run canard-dl --download 5518
 ```
 
+Without an explicit issue number, the interactive selector lets you choose one or more issues and includes a "Fetch older issues" action.
+
 Options:
 
 - `-e, --email` — account email (required)
 - `-p, --password` — account password (required)
 - `-o, --output DIR` — output directory (default: `output`)
 - `--count N` — number of recent issues to list (default: 12)
-- `--level {0,1, 2}` — tile zoom level for issue download (default: 0)
+- `--level {0,1}` — tile zoom level for issue download (default: 0)
 
 ## Development
 

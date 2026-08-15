@@ -1,5 +1,6 @@
 """Scrape the section index pages for recent articles."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -111,21 +112,38 @@ def list_recent(*, section: str | None = None, days: int = 7) -> list[Article]:
         )
 
     found: list[Article] = []
+    section_items = list(sections.items())
 
-    for name, path in sections.items():
-        try:
-            articles = fetch_section_articles(name, path)
-        # A failing section is skipped, the rest still get listed.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("Failed to fetch section %s: %s", name, e)
-            continue
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(section_items)))) as executor:
+        future_to_section = {
+            executor.submit(fetch_section_articles, name, path): name
+            for name, path in section_items
+        }
 
-        for article in articles:
-            if article.date.date() <= cutoff.date():
+        for future in as_completed(future_to_section):
+            name = future_to_section[future]
+
+            try:
+                articles = future.result()
+            # A failing section is skipped, the rest still get listed.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("Failed to fetch section %s: %s", name, e)
                 continue
 
-            found.append(article)
+            for article in articles:
+                if article.date.date() <= cutoff.date():
+                    continue
+
+                found.append(article)
 
     found.sort(key=lambda article: article.date, reverse=True)
+    deduped: list[Article] = []
+    seen_urls: set[str] = set()
 
-    return found
+    for article in found:
+        if article.url in seen_urls:
+            continue
+        seen_urls.add(article.url)
+        deduped.append(article)
+
+    return deduped
