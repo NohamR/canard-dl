@@ -15,3 +15,5 @@ wheels/
 # Output
 debug.html
 output/
+.env
+/research

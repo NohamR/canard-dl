@@ -1,43 +1,70 @@
 # canard-dl
 
-Download articles from [Le Canard Enchaîné](https://www.lecanardenchaine.fr).
+Download articles and issues from [Le Canard Enchaîné](https://www.lecanardenchaine.fr).
 
-## Usage
+## Modes
 
-```sh
-uv run main.py "https://www.lecanardenchaine.fr/societe/54632-quand-la-croisiere-ne-s-amuse-pas"
-```
+| Mode | Source | Account | Output |
+|------|--------|---------|--------|
+| Article | `lecanardenchaine.fr` | No | HTML + text |
+| Issue | `lire.lecanardenchaine.fr` | Yes | PDF |
 
-Or, once installed:
-
-```sh
-uv pip install -e .
-canard-dl "https://www.lecanardenchaine.fr/societe/54632-quand-la-croisiere-ne-s-amuse-pas"
-```
-
-Pick an article from the latest list instead of pasting a URL:
+## Install
 
 ```sh
-uv run main.py --list
+uv sync
 ```
 
-Each article is written to `output/` (override with `-o`) as:
+## Article download
 
-- `<slug>.html`
-- `<slug>.txt`
+Download by URL:
+
+```sh
+uv run canard-dl "https://www.lecanardenchaine.fr/societe/54632-quand-la-croisiere-ne-s-amuse-pas"
+```
+
+Or list recent articles and pick one interactively:
+
+```sh
+uv run canard-dl --list
+uv run canard-dl --list --section Économie
+```
+
+Each article is written to `output/` (override with `-o`) as `<slug>.html` and `<slug>.txt`.
 
 Options:
 
+- `-o, --output DIR` — output directory (default: `output`)
 - `--list` — list recent articles and pick one to download
-- `--section <name>` — restrict the list to one section
-- `--days <n>` — only list articles from the last n days (default: 7)
+- `--section NAME` — restrict the list to one section
+- `--days N` — only list articles from the last N days (default: 7)
 - `-v, --verbose` — debug output
 - `-q, --quiet` — only warnings and errors
+
+## Issue download
+
+Download a full digital issue as PDF (requires an account):
+
+```sh
+uv run canard-dl --download -e EMAIL -p PASSWORD
+```
+
+Download a specific issue by number:
+
+```sh
+uv run canard-dl --download 3922 -e EMAIL -p PASSWORD
+```
+
+Options:
+
+- `-e, --email` — account email (required)
+- `-p, --password` — account password (required)
+- `-o, --output DIR` — output directory (default: `output`)
+- `--count N` — number of recent issues to list (default: 12)
 
 ## Development
 
 ```sh
 uv sync
-uv run python -X dev main.py "URL"
-uv run pylint canard_dl main.py
+uv run pylint canard_dl
 ```
