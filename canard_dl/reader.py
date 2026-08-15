@@ -4,7 +4,12 @@ Handles fetching document metadata, page metadata, and downloading
 tiles from pressview5.immanens.com.
 """
 
+import io
 import math
+from dataclasses import dataclass
+
+import requests
+from PIL import Image
 
 from canard_dl.logger import get_logger
 
@@ -14,6 +19,50 @@ PV5_API = "https://pressview5.immanens.com/api"
 
 TILE_SIZE = 512
 DIVIDER = 2
+
+
+@dataclass(frozen=True)
+class RequestSettings:
+    """Download metadata shared across page, tile, and issue requests."""
+
+    level: int = 0
+    is_double: bool = False
+    token: str = ""
+    mtime: int = 0
+
+
+@dataclass(frozen=True)
+class PageRequest:
+    """Container for a page image download request."""
+
+    publication_id: int
+    document_id: int
+    page_id: int
+    width: int
+    height: int
+    settings: RequestSettings = RequestSettings()
+
+
+@dataclass(frozen=True)
+class TileRequest:
+    """Container for a single tile request."""
+
+    publication_id: int
+    document_id: int
+    page_id: int
+    x: int
+    y: int
+    settings: RequestSettings = RequestSettings()
+
+
+@dataclass(frozen=True)
+class IssueRequest:
+    """Container for an issue-wide download request."""
+
+    publication_id: int
+    document_id: int
+    nb_pages: int
+    settings: RequestSettings = RequestSettings()
 
 
 def _headers(token: str = "") -> dict:
@@ -48,8 +97,6 @@ def get_document(publication_id: int, document_id: int, token: str = "") -> dict
     if token:
         params["token"] = token
 
-    import requests
-
     response = requests.get(
         url,
         params=params,
@@ -77,7 +124,6 @@ def get_page(
     document_id: int,
     page_id: int,
     *,
-    is_double: bool = False,
     mtime: int = 0,
     token: str = "",
 ) -> dict:
@@ -89,8 +135,6 @@ def get_page(
         params["token"] = token
     if mtime:
         params["mt"] = mtime
-
-    import requests
 
     response = requests.get(
         url,
@@ -137,66 +181,38 @@ def tile_grid(width: int, height: int, level: int = 0) -> tuple[int, int]:
     return cols, rows
 
 
-def _server_id(page_id: int, is_double: bool) -> int:
-    """Map a logical page number to the server image id."""
-
-    if is_double and page_id != 1 and page_id % 2:
-        return page_id - 1
-
-    return page_id
-
-
-def tile_url(
-    publication_id: int,
-    document_id: int,
-    page_id: int,
-    x: int,
-    y: int,
-    level: int,
-    *,
-    is_double: bool = False,
-    token: str = "",
-    mtime: int = 0,
-) -> str:
+def tile_url(request: TileRequest) -> str:
     """Build the URL for a single tile."""
 
-    server_id = _server_id(page_id, is_double)
+    settings = request.settings
+    p_id = request.page_id
+    if settings.is_double and request.page_id != 1 and request.page_id % 2:
+        p_id = request.page_id - 1
 
     path = (
-        f"/document/{publication_id}/{document_id}"
-        f"/page/{server_id}/tile/{x}/{y}/{level}"
+        f"/document/{request.publication_id}/{request.document_id}"
+        f"/page/{p_id}/tile/{request.x}/{request.y}/{settings.level}"
     )
 
-    return _url(path, token=token, mtime=mtime)
+    return _url(path, token=settings.token, mtime=settings.mtime)
 
 
-def download_page_tiles(
-    publication_id: int,
-    document_id: int,
-    page_id: int,
-    width: int,
-    height: int,
-    *,
-    is_double: bool = False,
-    token: str = "",
-    mtime: int = 0,
-    level: int = 0,
-) -> list[list[bytes]]:
+# pylint: disable=too-many-locals
+def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
     """Download all tiles for a page at the given level.
 
     Returns a 2D list of tile image bytes: tiles[row][col].
     """
 
-    import requests
-
-    cols, rows = tile_grid(width, height, level)
+    settings = request.settings
+    cols, rows = tile_grid(request.width, request.height, settings.level)
 
     logger.info(
         "Downloading page %d: %dx%d tiles at level %d",
-        page_id,
+        request.page_id,
         cols,
         rows,
-        level,
+        settings.level,
     )
 
     tiles: list[list[bytes]] = []
@@ -206,22 +222,21 @@ def download_page_tiles(
 
         for col in range(cols):
             url = tile_url(
-                publication_id,
-                document_id,
-                page_id,
-                col,
-                row,
-                level,
-                is_double=is_double,
-                token=token,
-                mtime=mtime,
+                TileRequest(
+                    publication_id=request.publication_id,
+                    document_id=request.document_id,
+                    page_id=request.page_id,
+                    x=col,
+                    y=row,
+                    settings=settings,
+                )
             )
 
             logger.debug("Tile %d/%d: GET %s", col, row, url)
 
             response = requests.get(
                 url,
-                headers=_headers(token),
+                headers=_headers(settings.token),
                 timeout=30,
             )
 
@@ -234,6 +249,7 @@ def download_page_tiles(
     return tiles
 
 
+# pylint: disable=too-many-locals
 def stitch_tiles(
     tiles: list[list[bytes]],
     page_width: int,
@@ -246,10 +262,6 @@ def stitch_tiles(
     Returns raw JPEG bytes.
     """
 
-    from PIL import Image
-    import io
-
-    # Determine the actual image dimensions after scaling
     img_width = math.ceil(page_width / DIVIDER**level)
     img_height = math.ceil(page_height / DIVIDER**level)
 
@@ -266,7 +278,6 @@ def stitch_tiles(
             x = col * TILE_SIZE
             y = row * TILE_SIZE
 
-            # Edge tiles may extend beyond the canvas
             canvas.paste(tile_img, (x, y))
 
     buf = io.BytesIO()
@@ -275,44 +286,14 @@ def stitch_tiles(
     return buf.getvalue()
 
 
-def download_page_image(
-    publication_id: int,
-    document_id: int,
-    page_id: int,
-    width: int,
-    height: int,
-    *,
-    is_double: bool = False,
-    token: str = "",
-    mtime: int = 0,
-    level: int = 0,
-) -> bytes:
+def download_page_image(request: PageRequest) -> bytes:
     """Download and stitch all tiles for a page into a JPEG."""
 
-    tiles = download_page_tiles(
-        publication_id,
-        document_id,
-        page_id,
-        width,
-        height,
-        is_double=is_double,
-        token=token,
-        mtime=mtime,
-        level=level,
-    )
-
-    return stitch_tiles(tiles, width, height, level=level)
+    tiles = download_page_tiles(request)
+    return stitch_tiles(tiles, request.width, request.height, level=request.settings.level)
 
 
-def download_issue(
-    publication_id: int,
-    document_id: int,
-    nb_pages: int,
-    *,
-    is_double: bool = False,
-    token: str = "",
-    mtime: int = 0,
-) -> list[bytes]:
+def download_issue(request: IssueRequest) -> list[bytes]:
     """Download all pages of an issue as JPEG images.
 
     Returns a list of JPEG image bytes, one per page image.
@@ -320,31 +301,35 @@ def download_issue(
     """
 
     pages: list[bytes] = []
+    settings = request.settings
 
-    if is_double:
-        page_nums = [1] + list(range(2, nb_pages + 1, 2))
+    if settings.is_double:
+        page_nums = [1] + list(range(2, request.nb_pages + 1, 2))
     else:
-        page_nums = list(range(1, nb_pages + 1))
+        page_nums = list(range(1, request.nb_pages + 1))
 
     for idx, page_num in enumerate(page_nums):
         page_meta = get_page(
-            publication_id,
-            document_id,
+            request.publication_id,
+            request.document_id,
             page_num,
-            is_double=is_double,
-            mtime=mtime,
-            token=token,
+            mtime=settings.mtime,
+            token=settings.token,
         )
 
         img_data = download_page_image(
-            publication_id,
-            document_id,
-            page_num,
-            page_meta["width"],
-            page_meta["height"],
-            is_double=is_double,
-            token=token,
-            mtime=mtime,
+            PageRequest(
+                publication_id=request.publication_id,
+                document_id=request.document_id,
+                page_id=page_num,
+                width=page_meta["width"],
+                height=page_meta["height"],
+                settings=RequestSettings(
+                    is_double=settings.is_double,
+                    token=settings.token,
+                    mtime=settings.mtime,
+                ),
+            )
         )
 
         pages.append(img_data)
@@ -359,9 +344,6 @@ def save_issue_pdf(
     output_path: str,
 ) -> None:
     """Assemble JPEG page images into a PDF."""
-
-    from PIL import Image
-    import io
 
     if not pages:
         logger.error("No pages to save")

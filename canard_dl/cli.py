@@ -3,7 +3,7 @@
 Two modes:
   - canard-dl <url>              Download an article (no account)
   - canard-dl --list             Pick an article from recent list
-  - canard-dl download           Download a full issue (account required)
+  - canard-dl --download           Download a full issue (account required)
 """
 
 import argparse
@@ -23,9 +23,26 @@ from canard_dl.article import (
 )
 from canard_dl.index import list_recent
 from canard_dl.logger import get_logger, setup_logging
+from canard_dl.phenix import (
+    generate_device_sign,
+    get_anonymous_token,
+    get_issues,
+    get_publications,
+    get_streaming_token,
+    login,
+)
+from canard_dl.reader import (
+    IssueRequest,
+    RequestSettings,
+    download_issue,
+    get_document,
+    save_issue_pdf,
+)
 from canard_dl.spoofer import fetch
 
 logger = get_logger(__name__)
+
+LE_CANARD_PUBLICATION_ID = 315
 
 
 def make_filename(url: str) -> str:
@@ -144,97 +161,67 @@ def pick_article(*, section: str | None, days: int) -> str | None:
         logger.warning("Invalid choice, try again")
 
 
-def cmd_download(args: argparse.Namespace) -> None:
-    """Handle the 'download' subcommand — download a full issue."""
+def _resolve_canard_publication(publications: list[dict]) -> dict:
+    """Return the Le Canard publication, falling back to the first one."""
 
-    from canard_dl.phenix import (
-        generate_device_sign,
-        get_anonymous_token,
-        get_publications,
-        get_streaming_token,
-        get_issues,
-        login,
+    for publication in publications:
+        if publication.get("publication_id") == LE_CANARD_PUBLICATION_ID:
+            return publication
+
+    fallback = publications[0]
+    logger.warning(
+        "Le Canard not found, using %s",
+        fallback.get("publication_title", "unknown"),
     )
-    from canard_dl.reader import (
-        download_issue,
-        get_document,
-        save_issue_pdf,
-    )
+    return fallback
 
-    email = args.email
-    password = args.password
-    output_dir = Path(args.output)
-    number = args.number
 
-    # Step 1: device sign
+def _select_issue(issues: list[dict], number: int | None) -> dict | None:
+    """Return the chosen issue or prompt interactively if no number is supplied."""
+
+    if number is not None:
+        for issue in issues:
+            if issue["number"] == number:
+                return issue
+        logger.error("Issue #%d not found", number)
+        sys.exit(1)
+
+    return _pick_issue(issues)
+
+
+def _login(email: str, password: str) -> tuple[str, str]:
+    """Authenticate to the service and return the user token and customer hash."""
+
     device_sign = generate_device_sign()
     logger.debug("device_sign: %s", device_sign)
 
-    # Step 2: anonymous token
-    anonymous_token = get_anonymous_token(device_sign)
-
-    # Step 3: login
     logger.info("Logging in...")
-    login_data = login(email, password, anonymous_token)
-    user_token = login_data["x_user_token"]
-    customer_hash = login_data["customer_hash"]
+    login_data = login(email, password, get_anonymous_token(device_sign))
     logger.info("Logged in as %s", email)
+    return login_data["x_user_token"], login_data["customer_hash"]
 
-    # Step 4: list publications
+
+def _load_issue_download(args: argparse.Namespace) -> tuple[dict, str, dict] | None:
+    """Fetch the selected issue, access token and document metadata."""
+
+    user_token, customer_hash = _login(args.email, args.password)
     publications = get_publications(user_token, customer_hash, anonymous=False)
 
     if not publications:
         logger.error("No publications found")
         sys.exit(1)
 
-    # Find Le Canard publication (publication_id=315)
-    canard = None
-    for pub in publications:
-        if pub.get("publication_id") == 315:
-            canard = pub
-            break
-
-    if canard is None:
-        # Fall back to first publication
-        canard = publications[0]
-        logger.warning(
-            "Le Canard not found, using %s",
-            canard.get("publication_title", "unknown"),
-        )
-
-    pub_id = canard["publication_id"]
-
-    # Step 5: list issues
-    issues = get_issues(
-        pub_id,
-        user_token,
-        customer_hash,
-        count=args.count,
-    )
+    canard = _resolve_canard_publication(publications)
+    issues = get_issues(canard["publication_id"], user_token, customer_hash, count=args.count)
 
     if not issues:
         logger.error("No issues found")
         sys.exit(1)
 
-    # If a specific number was given, find it
-    if number is not None:
-        issue = None
-        for iss in issues:
-            if iss["number"] == number:
-                issue = iss
-                break
+    issue = _select_issue(issues, args.number)
+    if issue is None:
+        return None
 
-        if issue is None:
-            logger.error("Issue #%d not found", number)
-            sys.exit(1)
-    else:
-        # Interactive picker
-        issue = _pick_issue(issues)
-
-        if issue is None:
-            return
-
-    # Step 6: streaming token
     logger.info(
         "Getting streaming token for #%d (%s)...",
         issue["number"],
@@ -247,24 +234,34 @@ def cmd_download(args: argparse.Namespace) -> None:
         customer_hash,
     )
 
-    # Step 7: document metadata
     doc = get_document(issue["puc"], issue["number"], token=access_token)
-
-    # Step 8: download pages
     logger.info("Downloading %d pages...", doc["nbPages"])
+    return issue, access_token, doc
 
+
+def cmd_download(args: argparse.Namespace) -> None:
+    """Handle the 'download' subcommand — download a full issue."""
+
+    issue_data = _load_issue_download(args)
+    if issue_data is None:
+        return
+
+    issue, access_token, doc = issue_data
+    output_dir = Path(args.output)
     pages = download_issue(
-        issue["puc"],
-        issue["number"],
-        doc["nbPages"],
-        is_double=doc.get("isDouble", False),
-        token=access_token,
-        mtime=doc.get("mtime", 0),
+        IssueRequest(
+            publication_id=issue["puc"],
+            document_id=issue["number"],
+            nb_pages=doc["nbPages"],
+            settings=RequestSettings(
+                is_double=doc.get("isDouble", False),
+                token=access_token,
+                mtime=doc.get("mtime", 0),
+            ),
+        )
     )
 
-    # Step 9: save PDF
     output_dir.mkdir(parents=True, exist_ok=True)
-
     pdf_path = output_dir / f"canard-{issue['number']}.pdf"
     save_issue_pdf(pages, str(pdf_path))
 

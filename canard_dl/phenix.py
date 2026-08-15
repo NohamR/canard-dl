@@ -22,7 +22,6 @@ logger = get_logger(__name__)
 
 APP_ID = 343
 PHENIX_URL = "https://phenix2.immanens.com"
-PV5_API_URL = "https://pressview5.immanens.com/api"
 PHENIX_API_KEY = "56c3-ce9f-eb65-2296"
 HOST = "lire.lecanardenchaine.fr"
 
@@ -130,7 +129,6 @@ def login(
     return {
         "x_user_token": data["x_user_token"],
         "customer_hash": customer_hash,
-        "data": data.get("data", []),
     }
 
 
