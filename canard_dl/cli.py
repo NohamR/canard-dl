@@ -476,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--level",
         type=int,
-        choices=(0, 1),
+        choices=(0, 1, 2),
         default=0,
         help="Tile zoom level for issue download (allowed: 0 or 1, default: 0)",
     )
