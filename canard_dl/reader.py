@@ -6,6 +6,7 @@ tiles from pressview5.immanens.com.
 
 import io
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import requests
@@ -197,6 +198,21 @@ def tile_url(request: TileRequest) -> str:
     return _url(path, token=settings.token, mtime=settings.mtime)
 
 
+def _download_tile(request: TileRequest, headers: dict[str, str]) -> tuple[int, int, bytes]:
+    """Download one tile and return (row, col, payload)."""
+
+    url = tile_url(request)
+    logger.debug("Tile %d/%d: GET %s", request.x, request.y, url)
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return request.y, request.x, response.content
+
+
 # pylint: disable=too-many-locals
 def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
     """Download all tiles for a page at the given level.
@@ -215,38 +231,35 @@ def download_page_tiles(request: PageRequest) -> list[list[bytes]]:
         settings.level,
     )
 
-    tiles: list[list[bytes]] = []
+    tile_requests = [
+        TileRequest(
+            publication_id=request.publication_id,
+            document_id=request.document_id,
+            page_id=request.page_id,
+            x=col,
+            y=row,
+            settings=settings,
+        )
+        for row in range(rows)
+        for col in range(cols)
+    ]
 
-    for row in range(rows):
-        row_tiles: list[bytes] = []
+    headers = _headers(settings.token)
+    total_tiles = len(tile_requests)
+    max_workers = min(16, max(1, total_tiles))
+    logger.debug("Downloading %d tiles with %d workers", total_tiles, max_workers)
 
-        for col in range(cols):
-            url = tile_url(
-                TileRequest(
-                    publication_id=request.publication_id,
-                    document_id=request.document_id,
-                    page_id=request.page_id,
-                    x=col,
-                    y=row,
-                    settings=settings,
-                )
-            )
+    by_coord: dict[tuple[int, int], bytes] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(_download_tile, tile_request, headers)
+            for tile_request in tile_requests
+        ]
+        for future in as_completed(futures):
+            row, col, payload = future.result()
+            by_coord[(row, col)] = payload
 
-            logger.debug("Tile %d/%d: GET %s", col, row, url)
-
-            response = requests.get(
-                url,
-                headers=_headers(settings.token),
-                timeout=30,
-            )
-
-            response.raise_for_status()
-
-            row_tiles.append(response.content)
-
-        tiles.append(row_tiles)
-
-    return tiles
+    return [[by_coord[(row, col)] for col in range(cols)] for row in range(rows)]
 
 
 # pylint: disable=too-many-locals
@@ -325,6 +338,7 @@ def download_issue(request: IssueRequest) -> list[bytes]:
                 width=page_meta["width"],
                 height=page_meta["height"],
                 settings=RequestSettings(
+                    level=settings.level,
                     is_double=settings.is_double,
                     token=settings.token,
                     mtime=settings.mtime,

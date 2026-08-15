@@ -12,7 +12,7 @@ Download articles and issues from [Le Canard Enchaîné](https://www.lecanardenc
 ## Install
 
 ```sh
-uv sync
+git clone https://github.com/NohamR/canard-dl && cd canard-dl && uv sync
 ```
 
 ## Article download
