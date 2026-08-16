@@ -83,6 +83,7 @@ Options:
 - `-o, --output DIR` : output directory (default: `output`)
 - `--count N` : number of recent issues to list (default: 12)
 - `--level {0,1, 2}` : tile zoom level for issue download (default: 0)
+- `--split-double-pages` : split double pages into two single pages (default: False)
 
 ## Development
 

@@ -29,6 +29,7 @@ class RequestSettings:
 
     level: int = 0
     is_double: bool = False
+    split_double_pages: bool = False
     token: str = ""
     mtime: int = 0
 
@@ -329,11 +330,48 @@ def download_page_image(
     return stitch_tiles(tiles, request.width, request.height, level=request.settings.level)
 
 
+def should_split_double_page(page_num: int, spread_pages: list[int] | tuple[int, ...]) -> bool:
+    """Return True only for spreads that are genuinely in the middle of the issue.
+
+    The API exposes only the first page of each double-page spread in the
+    download list. The first and last entries are standalone single pages (cover
+    and final leaf), so they must never be split.
+    """
+
+    if not spread_pages:
+        return False
+
+    return page_num in spread_pages[1:-1]
+
+
+def split_double_page(page_data: bytes) -> list[bytes]:
+    """Split a double-page spread into two page images."""
+
+    img = Image.open(io.BytesIO(page_data)).convert("RGB")
+    width, height = img.size
+
+    if width < 2:
+        return [page_data]
+
+    midpoint = width // 2
+
+    left = img.crop((0, 0, midpoint, height))
+    right = img.crop((midpoint, 0, width, height))
+
+    buffer_left = io.BytesIO()
+    left.save(buffer_left, format="JPEG", quality=95)
+
+    buffer_right = io.BytesIO()
+    right.save(buffer_right, format="JPEG", quality=95)
+
+    return [buffer_left.getvalue(), buffer_right.getvalue()]
+
+
 def download_issue(request: IssueRequest) -> list[bytes]:
     """Download all pages of an issue as JPEG images.
 
     Returns a list of JPEG image bytes, one per page image.
-    For double spreads, each image covers two logical pages.
+    For double spreads, each image covers two logical pages unless split.
     """
 
     pages: list[bytes] = []
@@ -377,6 +415,7 @@ def download_issue(request: IssueRequest) -> list[bytes]:
                     settings=RequestSettings(
                         level=settings.level,
                         is_double=settings.is_double,
+                        split_double_pages=settings.split_double_pages,
                         token=settings.token,
                         mtime=settings.mtime,
                     ),
@@ -384,7 +423,14 @@ def download_issue(request: IssueRequest) -> list[bytes]:
                 progress=progress,
             )
 
-            pages.append(img_data)
+            if (
+                settings.is_double
+                and settings.split_double_pages
+                and should_split_double_page(page_num, page_nums)
+            ):
+                pages.extend(split_double_page(img_data))
+            else:
+                pages.append(img_data)
 
             _progress_info(
                 progress,

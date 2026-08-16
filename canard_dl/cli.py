@@ -303,6 +303,7 @@ def cmd_download(args: argparse.Namespace) -> None:
                 settings=RequestSettings(
                     level=args.level,
                     is_double=doc.get("isDouble", False),
+                    split_double_pages=args.split_double_pages,
                     token=access_token,
                     mtime=doc.get("mtime", 0),
                 ),
@@ -479,6 +480,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(0, 1, 2),
         default=0,
         help="Tile zoom level for issue download (allowed: 0 or 1, default: 0)",
+    )
+
+    parser.add_argument(
+        "--split-double-pages",
+        action="store_true",
+        help="Split double-page spreads into two single pages in the final PDF",
     )
 
     parser.add_argument(
