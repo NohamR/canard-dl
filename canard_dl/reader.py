@@ -184,17 +184,45 @@ def tile_grid(width: int, height: int, level: int = 0) -> tuple[int, int]:
     return cols, rows
 
 
+def spread_owner_page_id(page_id: int, is_double: bool) -> int:
+    """Return the page id that actually owns the tile data for ``page_id``.
+
+    In double-page mode, tiles are only stored under a spread's owner
+    (page 1, or an even page). Any odd page id greater than 1 is a
+    non-owner member of the spread owned by the preceding even page, so
+    it's remapped there. Single-page documents, and page 1 itself,
+    always map to themselves.
+    """
+
+    if is_double and page_id != 1 and page_id % 2:
+        return page_id - 1
+    return page_id
+
+
+def issue_page_numbers(nb_pages: int, is_double: bool) -> list[int]:
+    """Return the list of page ids that must be fetched for a full issue.
+
+    For single-page documents this is simply every page from 1 to
+    ``nb_pages``. For double-page documents only spread owners need to
+    be fetched: page 1 (standalone cover), then every even page id up
+    to ``nb_pages``.
+    """
+
+    if not is_double:
+        return list(range(1, nb_pages + 1))
+
+    return [1] + list(range(2, nb_pages + 1, 2))
+
+
 def tile_url(request: TileRequest) -> str:
     """Build the URL for a single tile."""
 
     settings = request.settings
-    p_id = request.page_id
-    if settings.is_double and request.page_id != 1 and request.page_id % 2:
-        p_id = request.page_id - 1
+    owner_page_id = spread_owner_page_id(request.page_id, settings.is_double)
 
     path = (
         f"/document/{request.publication_id}/{request.document_id}"
-        f"/page/{p_id}/tile/{request.x}/{request.y}/{settings.level}"
+        f"/page/{owner_page_id}/tile/{request.x}/{request.y}/{settings.level}"
     )
 
     return _url(path, token=settings.token, mtime=settings.mtime)
@@ -333,9 +361,10 @@ def download_page_image(
 def should_split_double_page(page_num: int, spread_pages: list[int] | tuple[int, ...]) -> bool:
     """Return True only for spreads that are genuinely in the middle of the issue.
 
-    The API exposes only the first page of each double-page spread in the
-    download list. The first and last entries are standalone single pages (cover
-    and final leaf), so they must never be split.
+    The API exposes only the owner page of each double-page spread in the
+    download list (see :func:`issue_page_numbers`). The first and last
+    entries are standalone single pages (cover and final leaf), so they
+    must never be split.
     """
 
     if not spread_pages:
@@ -367,21 +396,12 @@ def split_double_page(page_data: bytes) -> list[bytes]:
     return [buffer_left.getvalue(), buffer_right.getvalue()]
 
 
-def download_issue(request: IssueRequest) -> list[bytes]:
-    """Download all pages of an issue as JPEG images.
+def _plan_issue_pages(
+    request: IssueRequest, page_nums: list[int]
+) -> tuple[list[tuple[int, dict]], int]:
+    """Fetch metadata for every page in ``page_nums`` and total the tile count."""
 
-    Returns a list of JPEG image bytes, one per page image.
-    For double spreads, each image covers two logical pages unless split.
-    """
-
-    pages: list[bytes] = []
     settings = request.settings
-
-    if settings.is_double:
-        page_nums = [1] + list(range(2, request.nb_pages + 1, 2))
-    else:
-        page_nums = list(range(1, request.nb_pages + 1))
-
     page_plan: list[tuple[int, dict]] = []
     total_tiles = 0
 
@@ -397,6 +417,22 @@ def download_issue(request: IssueRequest) -> list[bytes]:
 
         cols, rows = tile_grid(page_meta["width"], page_meta["height"], settings.level)
         total_tiles += cols * rows
+
+    return page_plan, total_tiles
+
+
+def download_issue(request: IssueRequest) -> list[bytes]:
+    """Download all pages of an issue as JPEG images.
+
+    Returns a list of JPEG image bytes, one per page image.
+    For double spreads, each image covers two logical pages unless split.
+    """
+
+    settings = request.settings
+    page_nums = issue_page_numbers(request.nb_pages, settings.is_double)
+    page_plan, total_tiles = _plan_issue_pages(request, page_nums)
+
+    pages: list[bytes] = []
 
     with tqdm(
         total=total_tiles,
